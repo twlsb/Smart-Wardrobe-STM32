@@ -1,0 +1,20 @@
+# Keil 编译产生的中间文件和垃圾文件
+*.o
+*.d
+*.crf
+*.htm
+*.dep
+*.lnp
+*.axf
+*.sct
+*.map
+*.lst
+*.bak
+*.hex
+*.bin
+*.uvoptx
+*.uvgui.*
+*.scvd
+Objects/
+Listings/
+DebugConfig/
