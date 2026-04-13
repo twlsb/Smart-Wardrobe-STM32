@@ -718,6 +718,16 @@
               <FileType>5</FileType>
               <FilePath>.\Hardware\Control.h</FilePath>
             </File>
+            <File>
+              <FileName>MQ138.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\MQ138.c</FilePath>
+            </File>
+            <File>
+              <FileName>MQ138.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Hardware\MQ138.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
