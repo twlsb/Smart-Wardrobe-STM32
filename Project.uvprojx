@@ -728,6 +728,26 @@
               <FileType>5</FileType>
               <FilePath>.\Hardware\MQ138.h</FilePath>
             </File>
+            <File>
+              <FileName>Key.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\Key.c</FilePath>
+            </File>
+            <File>
+              <FileName>Key.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Hardware\Key.h</FilePath>
+            </File>
+            <File>
+              <FileName>SysLogic.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Hardware\SysLogic.c</FilePath>
+            </File>
+            <File>
+              <FileName>SysLogic.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Hardware\SysLogic.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

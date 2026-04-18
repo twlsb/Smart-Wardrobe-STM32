@@ -2,29 +2,61 @@
 #include "Delay.h"
 #include "OLED.h"
 #include "MQ138.h"
+#include "DHT22.h"    
+#include "AT24C02.h"  
+#include "Key.h"
+#include "SysLogic.h" 
 
 int main(void)
 {
+    // 1. 底层初始化
     OLED_Init();
     MQ138_Init();
+    DHT22_Init();
+    AT24C02_Init(); 
+    Key_Init();
     
-    OLED_ShowString(0, 0, "MQ-138 Test", OLED_8X16);
+    // 2. 业务逻辑初始化 (读取 AT24C02 阈值)
+    SysLogic_Init();
+    
+    OLED_ShowString(0, 0, "Booting...", OLED_8X16);
+    OLED_Update();
+    Delay_ms(500);
+    OLED_Clear();
+    
+    float temp = 0.0, humi = 0.0, ppm  = 0.0;
+    uint16_t sensorTimer = 200; 
+    uint8_t keyNum = 0;
+    
+    // 初始化直接显示一次主界面，避免启动时的短暂黑屏
+    SysLogic_ShowUI(temp, humi, ppm);
     
     while (1)
     {
-        uint16_t rawAdc = MQ138_GetRawAdc();
-        uint16_t fltAdc = MQ138_GetFilteredAdc();
-        float vol = MQ138_GetVoltage();
-        float ppm = MQ138_GetPPM();
+        // 3. 高频扫描：按键触发测试
+        keyNum = Key_GetNum();
+        if (keyNum != 0)
+        {
+            SysLogic_KeyHandler(keyNum);      // 切换状态或加减阈值并写入 EEPROM
+            SysLogic_ShowUI(temp, humi, ppm); // 立即刷新中文界面
+        }
         
-        // 打印原始值与滤波值对比，观察滤波效果
-        OLED_Printf(0, 16, OLED_8X16, "Raw:%04d", rawAdc);
-        OLED_Printf(64,16, OLED_8X16, "Flt:%04d", fltAdc);
+        // 4. 低频扫描：传感器数据更新与报警比对
+        if (sensorTimer >= 200) 
+        {
+            sensorTimer = 0;
+            
+            ppm = MQ138_GetPPM();
+            if(DHT22_ReadData(&temp, &humi) != 0) 
+            {
+                temp = 0.0; humi = 0.0;
+            }
+            
+            SysLogic_CheckAlarm(temp, humi, ppm);
+            SysLogic_ShowUI(temp, humi, ppm);
+        }
         
-        OLED_Printf(0, 32, OLED_8X16, "Vol:%.2f V", vol);
-        OLED_Printf(0, 48, OLED_8X16, "PPM:%.1f ", ppm);
-        
-        OLED_Update();
-        Delay_ms(100); 
+        Delay_ms(10);
+        sensorTimer++;
     }
 }
