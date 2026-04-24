@@ -31,23 +31,28 @@ void SysLogic_KeyHandler(uint8_t keyNum)
     {
         UI_State++;
         if (UI_State > 3) UI_State = 0;
-        
-        OLED_Clear(); // 切换界面时强制清屏防重影
+        OLED_Clear();
     }
-    else if (keyNum == 2) // K2: 数值加
+    else if (keyNum == 2) // K2: 数值加 (增加上限钳位 99)
     {
-        if(UI_State == 1) { SysThreshold.TempMax++; AT24C02_WriteByte(EEPROM_ADDR_TEMP, SysThreshold.TempMax); }
-        if(UI_State == 2) { SysThreshold.HumiMax++; AT24C02_WriteByte(EEPROM_ADDR_HUMI, SysThreshold.HumiMax); }
-        if(UI_State == 3) { SysThreshold.PpmMax++;  AT24C02_WriteByte(EEPROM_ADDR_PPM,  SysThreshold.PpmMax);  }
+        if(UI_State == 1 && SysThreshold.TempMax < 99) SysThreshold.TempMax++;
+        if(UI_State == 2 && SysThreshold.HumiMax < 99) SysThreshold.HumiMax++;
+        if(UI_State == 3 && SysThreshold.PpmMax < 99)  SysThreshold.PpmMax++;
     }
-    else if (keyNum == 3) // K3: 数值减
+    else if (keyNum == 3) // K3: 数值减 (增加下限钳位 1)
     {
-        if(UI_State == 1) { SysThreshold.TempMax--; AT24C02_WriteByte(EEPROM_ADDR_TEMP, SysThreshold.TempMax); }
-        if(UI_State == 2) { SysThreshold.HumiMax--; AT24C02_WriteByte(EEPROM_ADDR_HUMI, SysThreshold.HumiMax); }
-        if(UI_State == 3) { SysThreshold.PpmMax--;  AT24C02_WriteByte(EEPROM_ADDR_PPM,  SysThreshold.PpmMax);  }
+        if(UI_State == 1 && SysThreshold.TempMax > 1) SysThreshold.TempMax--;
+        if(UI_State == 2 && SysThreshold.HumiMax > 1) SysThreshold.HumiMax--;
+        if(UI_State == 3 && SysThreshold.PpmMax > 0)  SysThreshold.PpmMax--;
     }
-    else if (keyNum == 4) // K4: 强制返回主界面并保存
+    else if (keyNum == 4) // K4: 强制返回主界面并触发一次性保存
     {
+        if (UI_State != 0) // 只有从设置界面退出时才写入，保护 EEPROM
+        {
+            AT24C02_WriteByte(EEPROM_ADDR_TEMP, SysThreshold.TempMax);
+            AT24C02_WriteByte(EEPROM_ADDR_HUMI, SysThreshold.HumiMax);
+            AT24C02_WriteByte(EEPROM_ADDR_PPM,  SysThreshold.PpmMax);
+        }
         UI_State = 0;
         OLED_Clear();
     }
@@ -80,43 +85,78 @@ void SysLogic_ShowUI(float currentTemp, float currentHumi, float currentPpm)
     OLED_Update();
 }
 
-// 报警与继电器联动执行 (基于 Control.h 宏定义)
+// 报警与继电器联动执行 (集成迟滞回环控制防止继电器高频抽搐)
 void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm)
 {
     uint8_t isAlarm = 0;
-    uint8_t needFan = 0; // 风扇开启标志位，用于统筹温度与甲醛的排风需求
+    uint8_t needFan = 0; 
     
+    // 引入静态变量存储上一周期的报警状态，构建死区 (Hysteresis)
+    static uint8_t state_humi_alarm = 0;
+    static uint8_t state_temp_alarm = 0;
+    static uint8_t state_ppm_alarm  = 0;
+
+    // ---------------------------------------------------------
     // 1. 湿度判断 -> 独立控制除湿机 (Relay1)
+    // ---------------------------------------------------------
     if (currentHumi > SysThreshold.HumiMax) { 
-        Relay1_Set(ON); 
-        isAlarm = 1; 
-    } else { 
-        Relay1_Set(OFF); 
+        state_humi_alarm = 1; 
+    } else if (currentHumi < (SysThreshold.HumiMax - 2.0f)) { 
+        // 湿度下降到阈值 2.0% 以下才解除报警
+        state_humi_alarm = 0; 
     }
     
-    // 2. 温度判断 -> 触发风扇需求
+    if (state_humi_alarm) {
+        Relay1_Set(ON); 
+        isAlarm = 1; 
+    } else {
+        Relay1_Set(OFF);
+    }
+
+    // ---------------------------------------------------------
+    // 2. 温度判断 -> 触发风扇需求 (Relay3 统筹)
+    // ---------------------------------------------------------
     if (currentTemp > SysThreshold.TempMax) { 
+        state_temp_alarm = 1; 
+    } else if (currentTemp < (SysThreshold.TempMax - 1.0f)) { 
+        // 温度下降到阈值 1.0℃ 以下才解除报警
+        state_temp_alarm = 0; 
+    }
+
+    if (state_temp_alarm) {
         needFan = 1;
         isAlarm = 1; 
     }
-    
+
+    // ---------------------------------------------------------
     // 3. 甲醛判断 -> 独立控制杀菌灯 (Relay2)，并触发风扇排气需求
+    // ---------------------------------------------------------
     if (currentPpm > SysThreshold.PpmMax) { 
+        state_ppm_alarm = 1; 
+    } else if (currentPpm < (SysThreshold.PpmMax - 1.0f)) { 
+        // 甲醛下降到阈值 1.0 PPM 以下才解除报警
+        state_ppm_alarm = 0; 
+    }
+
+    if (state_ppm_alarm) {
         Relay2_Set(ON); 
         needFan = 1;
         isAlarm = 1; 
-    } else { 
-        Relay2_Set(OFF); 
+    } else {
+        Relay2_Set(OFF);
     }
-    
-    // 4. 风扇统筹执行 (Relay3)
+
+    // ---------------------------------------------------------
+    // 4. 执行器统筹输出
+    // ---------------------------------------------------------
+    // 风扇 (Relay3) 统筹：温度过高 或 甲醛超标，均触发排风
     if (needFan) {
         Relay3_Set(ON);
     } else {
         Relay3_Set(OFF);
     }
     
-    // 5. 蜂鸣器统筹执行
+    // 蜂鸣器统筹：任一指标超标即鸣叫
     if (isAlarm) { 
         Buzzer_Set(ON); 
     } else { 

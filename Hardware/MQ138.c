@@ -1,4 +1,8 @@
 #include "MQ138.h"
+#include "Delay.h"
+#include <math.h>
+
+static float R0_CleanAir = 21.5f;   // 洁净空气基准电阻全局变量
 
 /**
   * 函    数：MQ138 ADC初始化
@@ -88,15 +92,45 @@ float MQ138_GetVoltage(void)
 }
 
 /**
-  * 函    数：转换甲醛浓度 (经验公式估算模型)
-  * 说    明：MQ系列模块无法直接输出精确PPM。此为根据电压拟合的演示用线性转换函数。
-  * 返 回 值：浓度百分比或伪PPM值
+  * 函    数：开机提取洁净空气基准电阻 (R0)
+  * 说    明：必须在洁净空气中通电预热后调用
+  */
+void MQ138_CalibrateR0(void)
+{
+    float voltage = 0;
+    float sum_Rs = 0;
+    uint8_t i;
+    
+    // 连续采样50次取平均，过滤启动瞬态波动
+    for(i = 0; i < 50; i++)
+    {
+        voltage = MQ138_GetVoltage();
+        if(voltage <= 0.01f) voltage = 0.01f; // 防除零异常
+        // Rs = (Vc - Vout) / Vout * RL
+        sum_Rs += ((3.3f - voltage) / voltage * RL_VALUE);
+        Delay_ms(20);
+    }
+    R0_CleanAir = sum_Rs / 50.0f;
+}
+
+/**
+  * 函    数：获取高精度甲醛 PPM 浓度
+  * 返 回 值：甲醛浓度 PPM
   */
 float MQ138_GetPPM(void)
 {
     float voltage = MQ138_GetVoltage();
-    // 基础拟合：假设空气中基准电压为0.5V，满载为3.0V。此参数需根据你手头模块背面的电位器微调。
-    float ppm = (voltage - 0.5f) * 40.0f; 
-    if(ppm < 0) ppm = 0;
+    if(voltage <= 0.01f) voltage = 0.01f; // 防除零异常
+    
+    // 1. 计算实时电阻 Rs
+    float Rs = ((3.3f - voltage) / voltage * RL_VALUE);
+    
+    // 2. 计算电阻比率 Rs/R0
+    float ratio = Rs / R0_CleanAir;
+    
+    // 3. 幂函数拟合 (参数基于常规半导体甲醛气敏特性曲线)
+    float ppm = 1.25f * pow(ratio, -0.5f) - 1.25f; 
+    
+    if(ppm < 0.0f) ppm = 0.0f;
     return ppm;
 }
