@@ -21,7 +21,7 @@ void SysLogic_Init(void)
     // 初次烧录芯片防错机制（如果EEPROM为空，读出会是0xFF，强制赋默认值）
     if(SysThreshold.TempMax == 0xFF) SysThreshold.TempMax = 35;
     if(SysThreshold.HumiMax == 0xFF) SysThreshold.HumiMax = 70;
-    if(SysThreshold.PpmMax  == 0xFF) SysThreshold.PpmMax  = 10; 
+    if(SysThreshold.PpmMax  == 0xFF) SysThreshold.PpmMax  = 6; 
 }
 
 // 按键事件分发
@@ -61,26 +61,28 @@ void SysLogic_KeyHandler(uint8_t keyNum)
 // UI 渲染逻辑
 void SysLogic_ShowUI(float currentTemp, float currentHumi, float currentPpm)
 {
-    if (UI_State == 0) // 主状态监测界面
+    if (UI_State == 0) // 主状态监测界面 (分 4 行显示，彻底解决宽度溢出)
     {
-        OLED_Printf(0,  0, OLED_8X16, "T:%.1fC  H:%.1f%%", currentTemp, currentHumi);
-        OLED_Printf(0, 16, OLED_8X16, "HCHO:%.1f PPM   ", currentPpm);
-        OLED_Printf(0, 32, OLED_8X16, "- System Normal -"); 
+        OLED_Printf(0,  0, OLED_8X16, "温度: %.1f C    ", currentTemp);
+        OLED_Printf(0, 16, OLED_8X16, "湿度: %.1f %%   ", currentHumi);
+        OLED_Printf(0, 32, OLED_8X16, "甲醛: %.3f PPM  ", currentPpm);
+        OLED_Printf(0, 48, OLED_8X16, "-- 状态正常 --  "); 
     }
     else if (UI_State == 1) // 设置温度上限
     {
-        OLED_Printf(0, 0,  OLED_8X16, "== Set Temp ==");
-        OLED_Printf(0, 16, OLED_8X16, "Limit: %02d C", SysThreshold.TempMax);
+        OLED_Printf(0, 0,  OLED_8X16, "== 设置温度 ==  ");
+        OLED_Printf(0, 16, OLED_8X16, "阈值: %02d C    ", SysThreshold.TempMax);
     }
     else if (UI_State == 2) // 设置湿度上限
     {
-        OLED_Printf(0, 0,  OLED_8X16, "== Set Humi ==");
-        OLED_Printf(0, 16, OLED_8X16, "Limit: %02d %%", SysThreshold.HumiMax);
+        OLED_Printf(0, 0,  OLED_8X16, "== 设置湿度 ==  ");
+        OLED_Printf(0, 16, OLED_8X16, "阈值: %02d %%    ", SysThreshold.HumiMax);
     }
     else if (UI_State == 3) // 设置甲醛上限
     {
-        OLED_Printf(0, 0,  OLED_8X16, "== Set HCHO ==");
-        OLED_Printf(0, 16, OLED_8X16, "Limit: %02d PPM", SysThreshold.PpmMax);
+        OLED_Printf(0, 0,  OLED_8X16, "== 设置甲醛 ==  ");
+        // 将整数 PpmMax 缩小 100 倍显示。例如：内存存储 6，屏幕显示 0.06 PPM
+        OLED_Printf(0, 16, OLED_8X16, "阈值: %.2f PPM  ", SysThreshold.PpmMax / 100.0f);
     }
     OLED_Update();
 }
@@ -131,9 +133,12 @@ void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm)
     // ---------------------------------------------------------
     // 3. 甲醛判断 -> 独立控制杀菌灯 (Relay2)，并触发风扇排气需求
     // ---------------------------------------------------------
-    if (currentPpm > SysThreshold.PpmMax) { 
+    if (currentPpm >= (SysThreshold.PpmMax / 100.0f))
+	{ 
         state_ppm_alarm = 1; 
-    } else if (currentPpm < (SysThreshold.PpmMax - 1.0f)) { 
+    } 
+	else if (currentPpm < ((SysThreshold.PpmMax - 1.0f) / 100.0f))
+	{ 
         // 甲醛下降到阈值 1.0 PPM 以下才解除报警
         state_ppm_alarm = 0; 
     }

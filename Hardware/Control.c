@@ -48,6 +48,6 @@ void Relay3_Set(uint8_t State)
   */
 void Buzzer_Set(uint8_t State)
 {
-    // 如果是三极管驱动有源蜂鸣器，通常 1 为响，0 为静音
-    GPIO_WriteBit(BUZZER_PORT, BUZZER_PIN, (BitAction)(!State)); 
+    //  1 为响，0 为静音
+    GPIO_WriteBit(BUZZER_PORT, BUZZER_PIN, (BitAction)State); 
 }

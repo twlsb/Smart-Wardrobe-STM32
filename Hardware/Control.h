@@ -12,9 +12,9 @@
 #define BUZZER_PIN      GPIO_Pin_1    // 报警
 #define BUZZER_PORT     GPIOA
 
-/* 状态宏定义 (假设继电器为低电平触发模块，这是市面最常见的) */
-#define ON  0
-#define OFF 1
+/* 状态宏定义 */
+#define ON  1
+#define OFF 0
 
 /* 函数声明 */
 void Control_Init(void);
