@@ -2,7 +2,7 @@
 #include "Delay.h"
 #include <math.h>
 
-static float R0_CleanAir = 21.5f;   // 洁净空气基准电阻全局变量
+static float R0_CleanAir = 19.5f;   // 洁净空气基准电阻全局变量
 
 /**
   * 函    数：MQ138 ADC初始化
@@ -11,25 +11,24 @@ static float R0_CleanAir = 21.5f;   // 洁净空气基准电阻全局变量
 void MQ138_Init(void)
 {
     RCC_APB2PeriphClockCmd(MQ138_GPIO_RCC | MQ138_ADC_RCC, ENABLE);
-    RCC_ADCCLKConfig(RCC_PCLK2_Div6); // 72MHz / 6 = 12MHz (ADC时钟最大不得超过14MHz)
+    RCC_ADCCLKConfig(RCC_PCLK2_Div6); 
     
     GPIO_InitTypeDef GPIO_InitStructure;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AIN; // 模拟输入模式
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AIN; 
     GPIO_InitStructure.GPIO_Pin = MQ138_PIN;
     GPIO_Init(MQ138_PORT, &GPIO_InitStructure);
     
     ADC_InitTypeDef ADC_InitStructure;
-    ADC_InitStructure.ADC_Mode = ADC_Mode_Independent;                  // 独立模式
-    ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;              // 数据右对齐
-    ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None; // 软件触发
-    ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;                 // 单次转换
-    ADC_InitStructure.ADC_ScanConvMode = DISABLE;                       // 非扫描模式
-    ADC_InitStructure.ADC_NbrOfChannel = 1;                             // 通道数1
+    ADC_InitStructure.ADC_Mode = ADC_Mode_Independent;                  
+    ADC_InitStructure.ADC_DataAlign = ADC_DataAlign_Right;              
+    ADC_InitStructure.ADC_ExternalTrigConv = ADC_ExternalTrigConv_None; 
+    ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;                 
+    ADC_InitStructure.ADC_ScanConvMode = DISABLE;                       
+    ADC_InitStructure.ADC_NbrOfChannel = 1;                             
     ADC_Init(ADC1, &ADC_InitStructure);
     
     ADC_Cmd(ADC1, ENABLE);
     
-    /* ADC硬件校准 (必须执行，否则存在固定偏差) */
     ADC_ResetCalibration(ADC1);
     while (ADC_GetResetCalibrationStatus(ADC1) == SET);
     ADC_StartCalibration(ADC1);
@@ -38,20 +37,17 @@ void MQ138_Init(void)
 
 /**
   * 函    数：获取单次原始ADC值
-  * 返 回 值：12位ADC值 (范围：0~4095)
   */
 uint16_t MQ138_GetRawAdc(void)
 {
     ADC_RegularChannelConfig(ADC1, MQ138_ADC_CH, 1, ADC_SampleTime_55Cycles5);
-    ADC_SoftwareStartConvCmd(ADC1, ENABLE); // 软件触发一次转换
-    while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET); // 等待转换结束标志位
+    ADC_SoftwareStartConvCmd(ADC1, ENABLE); 
+    while (ADC_GetFlagStatus(ADC1, ADC_FLAG_EOC) == RESET); 
     return ADC_GetConversionValue(ADC1);
 }
 
 /**
   * 函    数：获取滑动平均滤波后的ADC值
-  * 返 回 值：滤波后的ADC平滑值
-  * 算法解析：维护一个长度为 FILTER_N 的 FIFO 队列，每次剔除最旧数据，压入最新数据，取算术平均。
   */
 uint16_t MQ138_GetFilteredAdc(void)
 {
@@ -61,17 +57,14 @@ uint16_t MQ138_GetFilteredAdc(void)
     uint32_t sum = 0;
     uint8_t i;
 
-    // 压入新数据
     filter_buf[filter_ptr++] = MQ138_GetRawAdc();
     
-    // 队列指针循环
     if (filter_ptr >= FILTER_N) 
     {
         filter_ptr = 0;
-        is_filled = 1; // 标记队列已被填满过至少一次
+        is_filled = 1; 
     }
 
-    // 计算当前有效数据均值 (防止开机初期数据被0拉低)
     uint8_t count = is_filled ? FILTER_N : filter_ptr;
     for (i = 0; i < count; i++) 
     {
@@ -83,7 +76,6 @@ uint16_t MQ138_GetFilteredAdc(void)
 
 /**
   * 函    数：将ADC值转换为真实电压
-  * 返 回 值：0.00 ~ 3.30 (单位：V)
   */
 float MQ138_GetVoltage(void)
 {
@@ -92,8 +84,18 @@ float MQ138_GetVoltage(void)
 }
 
 /**
+  * [新增] 函 数：获取当前传感器实时电阻 (Rs)
+  * 返 回 值：实时电阻值 (单位：kΩ)
+  */
+float MQ138_GetRs(void)
+{
+    float voltage = MQ138_GetVoltage();
+    if(voltage <= 0.01f) voltage = 0.01f; // 防除零异常
+    return ((3.3f - voltage) / voltage * RL_VALUE);
+}
+
+/**
   * 函    数：开机提取洁净空气基准电阻 (R0)
-  * 说    明：必须在洁净空气中通电预热后调用
   */
 void MQ138_CalibrateR0(void)
 {
@@ -101,12 +103,10 @@ void MQ138_CalibrateR0(void)
     float sum_Rs = 0;
     uint8_t i;
     
-    // 连续采样50次取平均，过滤启动瞬态波动
     for(i = 0; i < 50; i++)
     {
         voltage = MQ138_GetVoltage();
-        if(voltage <= 0.01f) voltage = 0.01f; // 防除零异常
-        // Rs = (Vc - Vout) / Vout * RL
+        if(voltage <= 0.01f) voltage = 0.01f; 
         sum_Rs += ((3.3f - voltage) / voltage * RL_VALUE);
         Delay_ms(20);
     }
@@ -115,20 +115,15 @@ void MQ138_CalibrateR0(void)
 
 /**
   * 函    数：获取高精度甲醛 PPM 浓度
-  * 返 回 值：甲醛浓度 PPM
   */
 float MQ138_GetPPM(void)
 {
     float voltage = MQ138_GetVoltage();
-    if(voltage <= 0.01f) voltage = 0.01f; // 防除零异常
+    if(voltage <= 0.01f) voltage = 0.01f; 
     
-    // 1. 计算实时电阻 Rs
     float Rs = ((3.3f - voltage) / voltage * RL_VALUE);
-    
-    // 2. 计算电阻比率 Rs/R0
     float ratio = Rs / R0_CleanAir;
     
-    // 3. 幂函数拟合 (参数基于常规半导体甲醛气敏特性曲线)
     float ppm = 1.25f * pow(ratio, -0.5f) - 1.25f; 
     
     if(ppm < 0.0f) ppm = 0.0f;

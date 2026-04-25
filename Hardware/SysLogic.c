@@ -41,7 +41,7 @@ void SysLogic_KeyHandler(uint8_t keyNum)
 {
     if (keyNum == 0) return;
 
-    // --- 状态 4: 手动控制逻辑 (完全独立) ---
+    // --- 状态 4: 手动控制逻辑 ---
     if (UI_State == 4) {
         if (keyNum == 1) { 
             // 退出手动，切回自动模式
@@ -101,7 +101,7 @@ void SysLogic_KeyHandler(uint8_t keyNum)
 
 void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm, uint8_t isPreheating)
 {
-    // 若系统处于手动控制模式，截断传感器对底层继电器的接管权
+    // 若系统处于手动控制模式，直接截断传感器对底层硬件的接管权
     if (Global_WorkMode == 1) return; 
 
     uint8_t isAlarm = 0;
@@ -115,6 +115,7 @@ void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm,
     // ---------------------------------------------------------
     // 1. 湿度逻辑 -> 控制 Relay1 (除湿)
     // ---------------------------------------------------------
+    // 湿度回差: 2.0%
     if (currentHumi > SysThreshold.HumiMax) state_humi_alarm = 1; 
     else if (currentHumi <= (SysThreshold.HumiMax - 2.0f)) state_humi_alarm = 0; 
     
@@ -127,6 +128,7 @@ void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm,
     // ---------------------------------------------------------
     // 2. 温度逻辑 -> 统筹 Relay3 (风扇)
     // ---------------------------------------------------------
+    // 温度回差: 1.0℃
     if (currentTemp > SysThreshold.TempMax) state_temp_alarm = 1; 
     else if (currentTemp <= (SysThreshold.TempMax - 1.0f)) state_temp_alarm = 0; 
 
@@ -139,7 +141,9 @@ void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm,
         state_ppm_alarm = 0; // 预热期间屏蔽甲醛报警
     } else {
         float ppm_max_f = SysThreshold.PpmMax / 100.0f;
-        float ppm_hyst_f = (SysThreshold.PpmMax >= 1) ? ((SysThreshold.PpmMax - 1.0f) / 100.0f) : 0.0f;
+        
+        // 【已优化】甲醛回差扩大至 2.0f (即 0.02 PPM)，并保留防负数下溢钳位
+        float ppm_hyst_f = (SysThreshold.PpmMax >= 2) ? ((SysThreshold.PpmMax - 2.0f) / 100.0f) : 0.0f;
 
         if (currentPpm >= ppm_max_f) state_ppm_alarm = 1; 
         else if (currentPpm <= ppm_hyst_f) state_ppm_alarm = 0; 
@@ -152,7 +156,7 @@ void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm,
     }
 
     // ---------------------------------------------------------
-    // 4. 统筹执行与状态更新
+    // 4. 统筹执行与状态同步
     // ---------------------------------------------------------
     if (needFan) { Relay3_Set(ON); current_r3 = 1; } 
     else { Relay3_Set(OFF); current_r3 = 0; }
@@ -160,7 +164,7 @@ void SysLogic_CheckAlarm(float currentTemp, float currentHumi, float currentPpm,
     if (isAlarm) Buzzer_Set(ON); 
     else Buzzer_Set(OFF);
     
-    // 刷新全局状态机供 UI 层读取
+    // 刷新全局状态机供 UI 层渲染
     if (isAlarm) Global_AlarmState = 1; 
     else if (isPreheating) Global_AlarmState = 2; 
     else Global_AlarmState = 0; 

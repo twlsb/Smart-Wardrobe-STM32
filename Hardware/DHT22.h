@@ -3,7 +3,7 @@
 
 #include "stm32f10x.h"
 
-/*引脚宏定义，方便后期修改移植*********************/
+/*引脚宏定义*********************/
 #define DHT22_RCC       RCC_APB2Periph_GPIOA
 #define DHT22_PORT      GPIOA
 #define DHT22_PIN       GPIO_Pin_8
