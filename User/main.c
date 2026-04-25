@@ -6,72 +6,61 @@
 #include "AT24C02.h"  
 #include "Key.h"
 #include "SysLogic.h" 
-#include "Control.h" // 强制引入控制层，接管继电器与蜂鸣器
+#include "Control.h" 
+
+// 预热时间定义 (可根据答辩演示节奏缩短至 30 秒)
+#define SENSOR_PREHEAT_SEC 180 
 
 int main(void)
 {
-    // ==========================================
-    // 1. 底层硬件全量初始化
-    // ==========================================
     OLED_Init();
     MQ138_Init();
     DHT22_Init();
     AT24C02_Init(); 
     Key_Init();
-    Control_Init();  // 修正项：挂载继电器与蜂鸣器 GPIO
+    Control_Init();  
+    SysLogic_Init(); 
     
-    // ==========================================
-    // 2. 业务逻辑与存储器挂载
-    // ==========================================
-    SysLogic_Init(); // 从 AT24C02 读取历史阈值，防错重置为 35/70/10
-    
-    // 开机自检动画
-    OLED_ShowString(0, 0, "System Booting..", OLED_8X16);
+    OLED_Printf(0, 0, OLED_8X16, "系统启动中...   ");
     OLED_Update();
     Delay_ms(1000);
     OLED_Clear();
     
     float temp = 0.0, humi = 0.0, ppm  = 0.0;
-    uint16_t sensorTimer = 200; // 初始强制为 200，保证开机立测
+    uint16_t sensorTimer = 200; 
+    uint16_t uptime_sec = 0;    // 系统运行秒数记录
+    uint8_t isPreheating = 1;   // 预热屏蔽锁
     uint8_t keyNum = 0;
     
-    // 初始化直接显示一次主界面防黑屏
     SysLogic_ShowUI(temp, humi, ppm);
     
     while (1)
     {
-        // ==========================================
-        // 3. 高频扫描任务：交互层 (10ms 响应)
-        // ==========================================
         keyNum = Key_GetNum();
         if (keyNum != 0)
         {
-            SysLogic_KeyHandler(keyNum);      // 切换菜单/修改阈值/保存EEPROM
-            SysLogic_ShowUI(temp, humi, ppm); // 立即刷新 UI 防迟滞
+            SysLogic_KeyHandler(keyNum);      
+            SysLogic_ShowUI(temp, humi, ppm); 
         }
         
-        // ==========================================
-        // 4. 低频扫描任务：采集与执行层 (2秒周期)
-        // ==========================================
         if (sensorTimer >= 200) 
         {
             sensorTimer = 0;
             
-            // [采集] 甲醛模拟量 (内部自带滑动平均滤波)
+            // [新增] 维护时间戳 (200次循环 = 200*10ms = 2秒)
+            uptime_sec += 2;
+            if (uptime_sec >= SENSOR_PREHEAT_SEC) {
+                isPreheating = 0; // 解除预热锁
+            }
+            
             ppm = MQ138_GetPPM();
             
-            // [采集] 温湿度单总线 (进入临界区防中断干扰)
             __disable_irq(); 
-            if(DHT22_ReadData(&temp, &humi) != 0) 
-            {
-                // 容错：若读取失败 (错误码1-6)，保留上一周期旧值，防止 UI 闪烁 0.0
-            }
+            DHT22_ReadData(&temp, &humi);
             __enable_irq();
             
-            // [执行] 判定当前值与 EEPROM 阈值，输出继电器/蜂鸣器电平 (含迟滞回环)
-            SysLogic_CheckAlarm(temp, humi, ppm);
-            
-            // [反馈] 更新实时状态
+            // 压入判定链路，屏蔽期强制传入 1
+            SysLogic_CheckAlarm(temp, humi, ppm, isPreheating);
             SysLogic_ShowUI(temp, humi, ppm);
         }
         
